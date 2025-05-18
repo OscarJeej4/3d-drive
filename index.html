@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>3D Driving Game - City with Collision</title>
+<title>3D Driving Game - Realistic Streets</title>
 <style>
   body, html {
     margin: 0; padding: 0; overflow: hidden; background: #87ceeb;
@@ -96,7 +96,7 @@
 
 <script>
   let scene, camera, renderer;
-  let car, carSpeed = 0, maxSpeed = 0.3;
+  let car, carSpeed = 0, maxSpeed = 0.12;
   let keys = { forward: false, back: false, left: false, right: false };
   let buildings = [];
   let carBox = new THREE.Box3();
@@ -125,42 +125,8 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Ground
-    const groundGeo = new THREE.PlaneGeometry(400, 400);
-    const groundMat = new THREE.MeshPhongMaterial({color:0x333333});
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.rotation.x = -Math.PI/2;
-    scene.add(ground);
-
-    // Road lines
-    const lineMat = new THREE.LineBasicMaterial({color: 0xffffff});
-    for(let z = -200; z < 200; z += 10) {
-      const points = [new THREE.Vector3(-2, 0.01, z), new THREE.Vector3(2, 0.01, z)];
-      const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-      const line = new THREE.Line(lineGeo, lineMat);
-      scene.add(line);
-    }
-
-    // Buildings
-    const buildingColors = [0x555555, 0x666666, 0x777777, 0x888888];
-    for(let x = -50; x <= 50; x += 10) {
-      for(let z = -50; z <= 50; z += 10) {
-        if(Math.abs(x) < 5 && Math.abs(z) < 200) continue; // keep road space
-        const height = 2 + Math.random() * 8;
-        const bGeo = new THREE.BoxGeometry(6, height, 6);
-        const bMat = new THREE.MeshStandardMaterial({color: buildingColors[Math.floor(Math.random()*buildingColors.length)]});
-        const building = new THREE.Mesh(bGeo, bMat);
-        building.position.set(x, height/2, z);
-        scene.add(building);
-        buildings.push(building);
-      }
-    }
-
-    // Create building bounding boxes for collision
-    buildings.forEach(b => {
-      let box = new THREE.Box3().setFromObject(b);
-      buildingBoxes.push(box);
-    });
+    // Ground with city blocks separated by roads
+    createCityBlocks();
 
     // Car
     const carGeo = new THREE.BoxGeometry(1, 0.5, 2);
@@ -259,9 +225,88 @@
       oscillator.connect(gainNode).connect(audioCtx.destination);
       oscillator.start();
     } catch(e) {
-      // Audio context may fail on some browsers/devices
       audioCtx = null;
     }
+  }
+
+  function createCityBlocks() {
+    // Create roads and buildings in a grid layout with streets of width 6 between blocks
+
+    const citySize = 100;
+    const blockSize = 10; // size of building block
+    const streetWidth = 6; // width of street between blocks
+
+    // Ground plane for the whole city (dark gray)
+    const groundGeo = new THREE.PlaneGeometry(citySize*2, citySize*2);
+    const groundMat = new THREE.MeshStandardMaterial({color: 0x222222});
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI/2;
+    scene.add(ground);
+
+    // Create roads as planes on the ground (lighter gray)
+    // Horizontal roads
+    for(let z = -citySize; z <= citySize; z += blockSize + streetWidth) {
+      const roadGeo = new THREE.PlaneGeometry(citySize*2, streetWidth);
+      const roadMat = new THREE.MeshStandardMaterial({color: 0x444444});
+      const road = new THREE.Mesh(roadGeo, roadMat);
+      road.rotation.x = -Math.PI/2;
+      road.position.z = z + streetWidth/2;
+      scene.add(road);
+
+      // Add dashed yellow center line on horizontal roads
+      addCenterLine(z + streetWidth/2, true);
+    }
+
+    // Vertical roads
+    for(let x = -citySize; x <= citySize; x += blockSize + streetWidth) {
+      const roadGeo = new THREE.PlaneGeometry(streetWidth, citySize*2);
+      const roadMat = new THREE.MeshStandardMaterial({color: 0x444444});
+      const road = new THREE.Mesh(roadGeo, roadMat);
+      road.rotation.x = -Math.PI/2;
+      road.position.x = x + streetWidth/2;
+      scene.add(road);
+
+      // Add dashed yellow center line on vertical roads
+      addCenterLine(x + streetWidth/2, false);
+    }
+
+    // Buildings on blocks between roads
+    const buildingColors = [0x555555, 0x666666, 0x777777, 0x888888];
+    for(let x = -citySize; x < citySize; x += blockSize + streetWidth) {
+      for(let z = -citySize; z < citySize; z += blockSize + streetWidth) {
+        // Skip positions that overlap roads
+        const height = 3 + Math.random() * 7;
+        const bGeo = new THREE.BoxGeometry(blockSize, height, blockSize);
+        const bMat = new THREE.MeshStandardMaterial({color: buildingColors[Math.floor(Math.random()*buildingColors.length)]});
+        const building = new THREE.Mesh(bGeo, bMat);
+        building.position.set(x + blockSize/2, height/2, z + blockSize/2);
+        scene.add(building);
+        buildings.push(building);
+      }
+    }
+
+    // Create building bounding boxes for collision
+    buildings.forEach(b => {
+      let box = new THREE.Box3().setFromObject(b);
+      buildingBoxes.push(box);
+    });
+  }
+
+  function addCenterLine(pos, horizontal) {
+    // Create dashed yellow center line on roads
+    const lineMat = new THREE.LineDashedMaterial({color: 0xFFFF00, dashSize: 1, gapSize: 1.2, linewidth: 2});
+    let points = [];
+    if(horizontal) {
+      points.push(new THREE.Vector3(-100, 0.02, pos));
+      points.push(new THREE.Vector3(100, 0.02, pos));
+    } else {
+      points.push(new THREE.Vector3(pos, 0.02, -100));
+      points.push(new THREE.Vector3(pos, 0.02, 100));
+    }
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+    const line = new THREE.Line(lineGeo, lineMat);
+    line.computeLineDistances();
+    scene.add(line);
   }
 
   function onWindowResize() {
@@ -283,34 +328,36 @@
 
   function updateCar() {
     if(carSpeed === 0 && !keys.forward && !keys.back) {
-      // do nothing if stopped
       return;
     }
 
-    // Acceleration & deceleration
+    // Slower acceleration & deceleration for realism
+    const acceleration = 0.003;
+    const deceleration = 0.0025;
+
     if(keys.forward) {
-      carSpeed += 0.01;
+      carSpeed += acceleration;
       if(carSpeed > maxSpeed) carSpeed = maxSpeed;
     } else if(keys.back) {
-      carSpeed -= 0.01;
+      carSpeed -= acceleration;
       if(carSpeed < -maxSpeed/2) carSpeed = -maxSpeed/2;
     } else {
       // friction
       if(carSpeed > 0) {
-        carSpeed -= 0.005;
+        carSpeed -= deceleration;
         if(carSpeed < 0) carSpeed = 0;
       } else if(carSpeed < 0) {
-        carSpeed += 0.005;
+        carSpeed += deceleration;
         if(carSpeed > 0) carSpeed = 0;
       }
     }
 
-    // Steering
+    // Steering - turn speed depends on car speed for realism
     if(keys.left) {
-      car.rotation.y += 0.03 * (carSpeed !== 0 ? Math.sign(carSpeed) : 1);
+      car.rotation.y += 0.025 * (carSpeed !== 0 ? Math.sign(carSpeed) : 1);
     }
     if(keys.right) {
-      car.rotation.y -= 0.03 * (carSpeed !== 0 ? Math.sign(carSpeed) : 1);
+      car.rotation.y -= 0.025 * (carSpeed !== 0 ? Math.sign(carSpeed) : 1);
     }
 
     // Predict next position for collision detection
@@ -338,9 +385,10 @@
       car.position.copy(nextPos);
     }
 
-    // Clamp car position within ground
-    car.position.x = THREE.MathUtils.clamp(car.position.x, -195, 195);
-    car.position.z = THREE.MathUtils.clamp(car.position.z, -195, 195);
+    // Clamp car position within city boundaries
+    const boundary = 100 - 2;
+    car.position.x = THREE.MathUtils.clamp(car.position.x, -boundary, boundary);
+    car.position.z = THREE.MathUtils.clamp(car.position.z, -boundary, boundary);
 
     // Update audio pitch
     if(audioCtx) {
@@ -369,13 +417,16 @@
   }
 
   function updateMinimap() {
-    // Sync mini car position and rotation
+    // Move mini car
     miniCar.position.set(car.position.x, car.position.y, car.position.z);
     miniCar.rotation.y = car.rotation.y;
+
+    // Move miniCamera to follow car, keep top-down
+    miniCamera.position.x = car.position.x;
+    miniCamera.position.z = car.position.z;
+    miniCamera.lookAt(car.position.x, 0, car.position.z);
   }
 </script>
 
 </body>
 </html>
-
-
