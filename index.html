@@ -1,261 +1,380 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>3D Driving Game</title>
-  <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
-    #ui {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      color: white;
-      font-family: sans-serif;
-      z-index: 10;
-    }
-    #speedometer {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      width: 120px;
-      height: 120px;
-      border: 2px solid white;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    #needle {
-      position: absolute;
-      width: 2px;
-      height: 60px;
-      background: red;
-      transform-origin: bottom center;
-      bottom: 10px;
-      left: 68px;
-    }
-    #minimap {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      width: 200px;
-      height: 200px;
-      border: 2px solid white;
-    }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>3D Driving Game - City with Collision</title>
+<style>
+  body, html {
+    margin: 0; padding: 0; overflow: hidden; background: #87ceeb;
+    touch-action: none;
+    font-family: monospace, monospace;
+  }
+  #info {
+    position: absolute; top: 10px; left: 10px;
+    color: white; user-select:none;
+    background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px;
+    max-width: 220px;
+    z-index: 10;
+  }
+  #touchControls {
+    position: absolute; bottom: 20px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; gap: 20px;
+    z-index: 10;
+  }
+  .btn {
+    width: 60px; height: 60px; border-radius: 30px;
+    background: rgba(0,0,0,0.5); color: white;
+    font-size: 24px; line-height: 60px; text-align: center;
+    user-select:none;
+  }
+  #speedometer {
+    position: absolute;
+    bottom: 100px;
+    left: 20px;
+    width: 120px;
+    height: 120px;
+    background: rgba(0,0,0,0.5);
+    border-radius: 60px;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    user-select:none;
+    z-index: 10;
+  }
+  #speedometer .needle {
+    width: 2px;
+    height: 50px;
+    background: red;
+    position: relative;
+    top: -15px;
+    transform-origin: bottom center;
+    transition: transform 0.1s ease-out;
+  }
+  #speedValue {
+    font-size: 20px;
+    margin-top: 10px;
+  }
+  #minimap {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 200px;
+    height: 200px;
+    border: 2px solid white;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.5);
+    z-index: 10;
+  }
+</style>
 </head>
 <body>
-  <div id="ui">
-    <div id="speedometer">
-      <div id="needle"></div>
-    </div>
-    <div id="speed">0 km/h</div>
-  </div>
-  <canvas id="minimap"></canvas>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-  <script>
-    (() => {
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      document.body.appendChild(renderer.domElement);
 
-      const miniRenderer = new THREE.WebGLRenderer({ canvas: document.getElementById('minimap'), alpha: true });
-      miniRenderer.setSize(200, 200);
-      const miniScene = new THREE.Scene();
-      const miniCamera = new THREE.OrthographicCamera(-20, 20, 20, -20, 1, 100);
+<div id="info">
+  Use WASD or Touch Buttons<br/>
+  W - Forward, S - Back, A - Left, D - Right
+</div>
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-      scene.add(ambientLight);
-      const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-      dirLight.position.set(5, 10, 7.5);
-      scene.add(dirLight);
+<div id="touchControls">
+  <div id="leftBtn" class="btn">◀️</div>
+  <div id="forwardBtn" class="btn">▲</div>
+  <div id="backBtn" class="btn">▼</div>
+  <div id="rightBtn" class="btn">▶️</div>
+</div>
 
-      const groundSize = 200;
-      const streetWidth = 4;
-      const blockSize = 10;
-      const citySize = 50;
+<div id="speedometer">
+  <div class="needle" id="needle"></div>
+  <div id="speedValue">0 km/h</div>
+</div>
 
-      const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(groundSize, groundSize),
-        new THREE.MeshStandardMaterial({ color: 0x222222 })
-      );
-      ground.rotation.x = -Math.PI / 2;
-      scene.add(ground);
+<div id="minimap"></div>
 
-      // Create roads
-      const lineMaterial = new THREE.LineDashedMaterial({ color: 0xffff00, dashSize: 1, gapSize: 1 });
-      for (let x = -citySize; x <= citySize; x += blockSize + streetWidth) {
-        const road = new THREE.Mesh(
-          new THREE.PlaneGeometry(streetWidth, groundSize),
-          new THREE.MeshStandardMaterial({ color: 0x333333 })
-        );
-        road.rotation.x = -Math.PI / 2;
-        road.position.x = x;
-        scene.add(road);
+<script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
 
-        // Road line
-        const points = [new THREE.Vector3(x, 0.01, -groundSize/2), new THREE.Vector3(x, 0.01, groundSize/2)];
-        const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(lineGeo, lineMaterial);
-        line.computeLineDistances();
-        scene.add(line);
+<script>
+  let scene, camera, renderer;
+  let car, carSpeed = 0, maxSpeed = 0.3;
+  let keys = { forward: false, back: false, left: false, right: false };
+  let buildings = [];
+  let carBox = new THREE.Box3();
+  let buildingBoxes = [];
+
+  // Mini-map vars
+  let miniRenderer, miniCamera, miniScene;
+  let miniCar;
+
+  // Audio vars
+  let audioCtx, oscillator, gainNode;
+
+  init();
+  animate();
+
+  function init() {
+    // Main scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 5, -10);
+    camera.lookAt(0, 0, 0);
+
+    renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Ground
+    const groundGeo = new THREE.PlaneGeometry(400, 400);
+    const groundMat = new THREE.MeshPhongMaterial({color:0x333333});
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI/2;
+    scene.add(ground);
+
+    // Road lines
+    const lineMat = new THREE.LineBasicMaterial({color: 0xffffff});
+    for(let z = -200; z < 200; z += 10) {
+      const points = [new THREE.Vector3(-2, 0.01, z), new THREE.Vector3(2, 0.01, z)];
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+      const line = new THREE.Line(lineGeo, lineMat);
+      scene.add(line);
+    }
+
+    // Buildings
+    const buildingColors = [0x555555, 0x666666, 0x777777, 0x888888];
+    for(let x = -50; x <= 50; x += 10) {
+      for(let z = -50; z <= 50; z += 10) {
+        if(Math.abs(x) < 5 && Math.abs(z) < 200) continue; // keep road space
+        const height = 2 + Math.random() * 8;
+        const bGeo = new THREE.BoxGeometry(6, height, 6);
+        const bMat = new THREE.MeshStandardMaterial({color: buildingColors[Math.floor(Math.random()*buildingColors.length)]});
+        const building = new THREE.Mesh(bGeo, bMat);
+        building.position.set(x, height/2, z);
+        scene.add(building);
+        buildings.push(building);
       }
-      for (let z = -citySize; z <= citySize; z += blockSize + streetWidth) {
-        const road = new THREE.Mesh(
-          new THREE.PlaneGeometry(groundSize, streetWidth),
-          new THREE.MeshStandardMaterial({ color: 0x333333 })
-        );
-        road.rotation.x = -Math.PI / 2;
-        road.position.z = z;
-        scene.add(road);
+    }
 
-        const points = [new THREE.Vector3(-groundSize/2, 0.01, z), new THREE.Vector3(groundSize/2, 0.01, z)];
-        const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(lineGeo, lineMaterial);
-        line.computeLineDistances();
-        scene.add(line);
+    // Create building bounding boxes for collision
+    buildings.forEach(b => {
+      let box = new THREE.Box3().setFromObject(b);
+      buildingBoxes.push(box);
+    });
+
+    // Car
+    const carGeo = new THREE.BoxGeometry(1, 0.5, 2);
+    const carMat = new THREE.MeshStandardMaterial({color:0xff0000});
+    car = new THREE.Mesh(carGeo, carMat);
+    car.position.y = 0.25;
+    scene.add(car);
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(5, 10, 7);
+    scene.add(directionalLight);
+
+    // Mini-map
+    miniScene = new THREE.Scene();
+
+    miniCamera = new THREE.OrthographicCamera(-30, 30, 30, -30, 0.1, 1000);
+    miniCamera.position.set(0, 60, 0);
+    miniCamera.lookAt(0, 0, 0);
+    miniScene.add(miniCamera);
+
+    // Grid helper for mini-map ground
+    miniScene.add(new THREE.GridHelper(100, 20, 0xffffff, 0x444444));
+
+    // Mini-map buildings (gray boxes)
+    buildings.forEach(b => {
+      const bMiniGeo = new THREE.BoxGeometry(b.geometry.parameters.width, b.geometry.parameters.height, b.geometry.parameters.depth);
+      const bMiniMat = new THREE.MeshBasicMaterial({color: 0x666666});
+      const bMini = new THREE.Mesh(bMiniGeo, bMiniMat);
+      bMini.position.copy(b.position);
+      miniScene.add(bMini);
+    });
+
+    // Mini car (blue)
+    const miniCarGeo = new THREE.BoxGeometry(1, 0.5, 2);
+    const miniCarMat = new THREE.MeshBasicMaterial({color: 0x0000ff});
+    miniCar = new THREE.Mesh(miniCarGeo, miniCarMat);
+    miniScene.add(miniCar);
+
+    miniRenderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+    miniRenderer.setSize(200, 200);
+    miniRenderer.setClearColor(0x000000, 0);
+    document.getElementById('minimap').appendChild(miniRenderer.domElement);
+
+    // Controls
+    window.addEventListener('resize', onWindowResize);
+
+    window.addEventListener('keydown', (e) => {
+      if(e.code === "KeyW") keys.forward = true;
+      if(e.code === "KeyS") keys.back = true;
+      if(e.code === "KeyA") keys.left = true;
+      if(e.code === "KeyD") keys.right = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      if(e.code === "KeyW") keys.forward = false;
+      if(e.code === "KeyS") keys.back = false;
+      if(e.code === "KeyA") keys.left = false;
+      if(e.code === "KeyD") keys.right = false;
+    });
+
+    // Touch buttons
+    const forwardBtn = document.getElementById('forwardBtn');
+    const backBtn = document.getElementById('backBtn');
+    const leftBtn = document.getElementById('leftBtn');
+    const rightBtn = document.getElementById('rightBtn');
+
+    function addTouchEvents(button, key) {
+      button.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys[key] = true;
+      }, {passive:false});
+      button.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys[key] = false;
+      }, {passive:false});
+      button.addEventListener('touchcancel', (e) => {
+        e.preventDefault();
+        keys[key] = false;
+      }, {passive:false});
+    }
+
+    addTouchEvents(forwardBtn, 'forward');
+    addTouchEvents(backBtn, 'back');
+    addTouchEvents(leftBtn, 'left');
+    addTouchEvents(rightBtn, 'right');
+
+    // Audio init
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      oscillator = audioCtx.createOscillator();
+      gainNode = audioCtx.createGain();
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(0, audioCtx.currentTime);
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      oscillator.connect(gainNode).connect(audioCtx.destination);
+      oscillator.start();
+    } catch(e) {
+      // Audio context may fail on some browsers/devices
+      audioCtx = null;
+    }
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    updateCar();
+    updateCamera();
+    updateSpeedometer();
+    updateMinimap();
+    renderer.render(scene, camera);
+    miniRenderer.render(miniScene, miniCamera);
+  }
+
+  function updateCar() {
+    if(carSpeed === 0 && !keys.forward && !keys.back) {
+      // do nothing if stopped
+      return;
+    }
+
+    // Acceleration & deceleration
+    if(keys.forward) {
+      carSpeed += 0.01;
+      if(carSpeed > maxSpeed) carSpeed = maxSpeed;
+    } else if(keys.back) {
+      carSpeed -= 0.01;
+      if(carSpeed < -maxSpeed/2) carSpeed = -maxSpeed/2;
+    } else {
+      // friction
+      if(carSpeed > 0) {
+        carSpeed -= 0.005;
+        if(carSpeed < 0) carSpeed = 0;
+      } else if(carSpeed < 0) {
+        carSpeed += 0.005;
+        if(carSpeed > 0) carSpeed = 0;
       }
+    }
 
-      // Create buildings
-      const buildingBoxes = [];
-      for (let x = -citySize; x < citySize; x += blockSize + streetWidth) {
-        for (let z = -citySize; z < citySize; z += blockSize + streetWidth) {
-          const building = new THREE.Mesh(
-            new THREE.BoxGeometry(blockSize, Math.random() * 20 + 10, blockSize),
-            new THREE.MeshStandardMaterial({ color: 0x888888 })
-          );
-          building.position.set(x + blockSize/2 + streetWidth, building.geometry.parameters.height/2, z + blockSize/2 + streetWidth);
-          scene.add(building);
-          const box = new THREE.Box3().setFromObject(building);
-          buildingBoxes.push(box);
-        }
+    // Steering
+    if(keys.left) {
+      car.rotation.y += 0.03 * (carSpeed !== 0 ? Math.sign(carSpeed) : 1);
+    }
+    if(keys.right) {
+      car.rotation.y -= 0.03 * (carSpeed !== 0 ? Math.sign(carSpeed) : 1);
+    }
+
+    // Predict next position for collision detection
+    const direction = new THREE.Vector3(0, 0, 1);
+    direction.applyEuler(car.rotation);
+    direction.multiplyScalar(carSpeed);
+    const nextPos = car.position.clone().add(direction);
+
+    // Update bounding box of car at next position
+    carBox.setFromObject(car);
+    carBox.translate(direction);
+
+    // Check collision with buildings
+    let collision = false;
+    for(let box of buildingBoxes) {
+      if(carBox.intersectsBox(box)) {
+        collision = true;
+        break;
       }
+    }
 
-      // Car setup
-      const carGeo = new THREE.BoxGeometry(1, 0.5, 2);
-      const carMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-      const car = new THREE.Mesh(carGeo, carMat);
-      car.position.set(streetWidth / 2, 0.25, streetWidth / 2); // Spawn on a road, not inside building
-      scene.add(car);
+    if(collision) {
+      carSpeed = 0; // stop car on collision
+    } else {
+      car.position.copy(nextPos);
+    }
 
-      const miniCar = new THREE.Mesh(carGeo, new THREE.MeshBasicMaterial({ color: 0x0000ff }));
-      miniScene.add(miniCar);
+    // Clamp car position within ground
+    car.position.x = THREE.MathUtils.clamp(car.position.x, -195, 195);
+    car.position.z = THREE.MathUtils.clamp(car.position.z, -195, 195);
 
-      let carSpeed = 0;
-      const maxSpeed = 0.5;
-      const acceleration = 0.002;
-      const deceleration = 0.005;
-      const steeringSpeed = 0.03;
+    // Update audio pitch
+    if(audioCtx) {
+      oscillator.frequency.setValueAtTime(200 + carSpeed * 800, audioCtx.currentTime);
+      gainNode.gain.setValueAtTime(Math.abs(carSpeed)*0.1, audioCtx.currentTime);
+    }
+  }
 
-      const keys = { forward: false, back: false, left: false, right: false };
-      document.addEventListener('keydown', e => {
-        if (e.key === 'w') keys.forward = true;
-        if (e.key === 's') keys.back = true;
-        if (e.key === 'a') keys.left = true;
-        if (e.key === 'd') keys.right = true;
-      });
-      document.addEventListener('keyup', e => {
-        if (e.key === 'w') keys.forward = false;
-        if (e.key === 's') keys.back = false;
-        if (e.key === 'a') keys.left = false;
-        if (e.key === 'd') keys.right = false;
-      });
+  function updateCamera() {
+    // Follow car from behind and above
+    const relativeCameraOffset = new THREE.Vector3(0, 5, -10);
+    const cameraOffset = relativeCameraOffset.applyEuler(car.rotation).add(car.position);
+    camera.position.lerp(cameraOffset, 0.1);
+    camera.lookAt(car.position);
+  }
 
-      const carBox = new THREE.Box3().setFromObject(car);
+  function updateSpeedometer() {
+    const needle = document.getElementById('needle');
+    const speedValue = document.getElementById('speedValue');
 
-      // Audio
-      let audioCtx = null;
-      let oscillator = null;
-      let gainNode = null;
+    // Map speed to degrees (-90° to 90°)
+    const deg = THREE.MathUtils.clamp(carSpeed / maxSpeed, -1, 1) * 90;
+    needle.style.transform = `rotate(${deg}deg)`;
 
-      function initSound() {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        oscillator = audioCtx.createOscillator();
-        gainNode = audioCtx.createGain();
-        oscillator.connect(gainNode).connect(audioCtx.destination);
-        oscillator.start();
-      }
+    speedValue.textContent = `${Math.abs((carSpeed / maxSpeed * 100) * 2).toFixed(0)} km/h`;
+  }
 
-      document.body.addEventListener('click', () => {
-        if (!audioCtx) initSound();
-      });
+  function updateMinimap() {
+    // Sync mini car position and rotation
+    miniCar.position.set(car.position.x, car.position.y, car.position.z);
+    miniCar.rotation.y = car.rotation.y;
+  }
+</script>
 
-      function updateCar() {
-        if(keys.forward) carSpeed += acceleration;
-        else if(keys.back) carSpeed -= acceleration;
-        else {
-          if(carSpeed > 0) carSpeed -= deceleration;
-          else if(carSpeed < 0) carSpeed += deceleration;
-          if(Math.abs(carSpeed) < deceleration) carSpeed = 0;
-        }
-
-        carSpeed = THREE.MathUtils.clamp(carSpeed, -maxSpeed, maxSpeed);
-
-        if(carSpeed !== 0) {
-          if(keys.left) car.rotation.y += steeringSpeed * (carSpeed > 0 ? 1 : -1);
-          if(keys.right) car.rotation.y -= steeringSpeed * (carSpeed > 0 ? 1 : -1);
-        }
-
-        const direction = new THREE.Vector3(0, 0, 1).applyEuler(car.rotation).multiplyScalar(carSpeed);
-        const nextPos = car.position.clone().add(direction);
-        carBox.setFromObject(car);
-        carBox.min.add(direction);
-        carBox.max.add(direction);
-
-        let collided = false;
-        for(const box of buildingBoxes) {
-          if(carBox.intersectsBox(box)) {
-            collided = true;
-            break;
-          }
-        }
-
-        if(collided) carSpeed = 0;
-        else car.position.copy(nextPos);
-      }
-
-      function updateCamera() {
-        const offset = new THREE.Vector3(0, 5, -12).applyEuler(car.rotation);
-        camera.position.lerp(car.position.clone().add(offset), 0.1);
-        camera.lookAt(car.position);
-      }
-
-      function updateSpeedometer() {
-        const rotation = THREE.MathUtils.clamp(carSpeed / maxSpeed, -1, 1) * 90;
-        document.getElementById('needle').style.transform = `rotate(${rotation}deg)`;
-        document.getElementById('speed').textContent = `${Math.abs((carSpeed / maxSpeed) * 120).toFixed(0)} km/h`;
-      }
-
-      function updateMinimap() {
-        miniCamera.position.set(car.position.x, 60, car.position.z);
-        miniCamera.lookAt(car.position);
-        miniCar.position.set(car.position.x, 0.25, car.position.z);
-        miniCar.rotation.y = car.rotation.y;
-      }
-
-      function animate() {
-        requestAnimationFrame(animate);
-        updateCar();
-        updateCamera();
-        updateSpeedometer();
-        updateMinimap();
-
-        if(audioCtx) {
-          oscillator.frequency.setValueAtTime(200 + Math.abs(carSpeed)*3500, audioCtx.currentTime);
-          gainNode.gain.setValueAtTime(Math.abs(carSpeed)*0.15, audioCtx.currentTime);
-        }
-
-        renderer.render(scene, camera);
-        miniRenderer.render(miniScene, miniCamera);
-      }
-
-      camera.position.set(0, 5, -10);
-      camera.lookAt(0, 0, 0);
-      animate();
-    })();
-  </script>
 </body>
 </html>
+
