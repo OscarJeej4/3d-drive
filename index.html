@@ -15,6 +15,7 @@
     color: white; user-select:none;
     background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px;
     max-width: 220px;
+    z-index: 10;
   }
   #touchControls {
     position: absolute; bottom: 20px; left: 50%;
@@ -247,22 +248,19 @@
     addTouchEvents(leftBtn, 'left');
     addTouchEvents(rightBtn, 'right');
 
-    // Audio setup
+    // Audio init
     try {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
       oscillator = audioCtx.createOscillator();
-      oscillator.type = 'sawtooth';
-
       gainNode = audioCtx.createGain();
-      gainNode.gain.value = 0.02;
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
-
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(0, audioCtx.currentTime);
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      oscillator.connect(gainNode).connect(audioCtx.destination);
       oscillator.start();
-    } catch (e) {
-      console.warn("Web Audio API not supported or context not allowed.");
+    } catch(e) {
+      // Audio context may fail on some browsers/devices
+      audioCtx = null;
     }
   }
 
@@ -272,12 +270,24 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  const maxSpeedKmh = 80;
-
   function animate() {
     requestAnimationFrame(animate);
 
-    // Update car speed & rotation input
+    updateCar();
+    updateCamera();
+    updateSpeedometer();
+    updateMinimap();
+    renderer.render(scene, camera);
+    miniRenderer.render(miniScene, miniCamera);
+  }
+
+  function updateCar() {
+    if(carSpeed === 0 && !keys.forward && !keys.back) {
+      // do nothing if stopped
+      return;
+    }
+
+    // Acceleration & deceleration
     if(keys.forward) {
       carSpeed += 0.01;
       if(carSpeed > maxSpeed) carSpeed = maxSpeed;
@@ -285,79 +295,87 @@
       carSpeed -= 0.01;
       if(carSpeed < -maxSpeed/2) carSpeed = -maxSpeed/2;
     } else {
-      carSpeed *= 0.95;
-      if(Math.abs(carSpeed) < 0.001) carSpeed = 0;
+      // friction
+      if(carSpeed > 0) {
+        carSpeed -= 0.005;
+        if(carSpeed < 0) carSpeed = 0;
+      } else if(carSpeed < 0) {
+        carSpeed += 0.005;
+        if(carSpeed > 0) carSpeed = 0;
+      }
     }
 
-    if(keys.left) car.rotation.y += 0.03;
-    if(keys.right) car.rotation.y -= 0.03;
+    // Steering
+    if(keys.left) {
+      car.rotation.y += 0.03 * (carSpeed !== 0 ? Math.sign(carSpeed) : 1);
+    }
+    if(keys.right) {
+      car.rotation.y -= 0.03 * (carSpeed !== 0 ? Math.sign(carSpeed) : 1);
+    }
 
-    // Save old pos & rot for collision rollback
-    let oldPos = car.position.clone();
-    let oldRot = car.rotation.y;
+    // Predict next position for collision detection
+    const direction = new THREE.Vector3(0, 0, 1);
+    direction.applyEuler(car.rotation);
+    direction.multiplyScalar(carSpeed);
+    const nextPos = car.position.clone().add(direction);
 
-    // Move car forward
-    car.position.x += Math.sin(car.rotation.y) * carSpeed;
-    car.position.z += Math.cos(car.rotation.y) * carSpeed;
-
-    // Update bounding box
+    // Update bounding box of car at next position
     carBox.setFromObject(car);
+    carBox.translate(direction);
 
-    // Collision detection
-    let collided = false;
-    for(let i=0; i < buildingBoxes.length; i++) {
-      if(carBox.intersectsBox(buildingBoxes[i])) {
-        collided = true;
+    // Check collision with buildings
+    let collision = false;
+    for(let box of buildingBoxes) {
+      if(carBox.intersectsBox(box)) {
+        collision = true;
         break;
       }
     }
 
-    if(collided) {
-      // Revert position & rotation, stop car
-      car.position.copy(oldPos);
-      car.rotation.y = oldRot;
-      carSpeed = 0;
+    if(collision) {
+      carSpeed = 0; // stop car on collision
+    } else {
+      car.position.copy(nextPos);
     }
 
-    // Update camera
-    const relativeCameraOffset = new THREE.Vector3(0, 5, -10);
-    const cameraOffset = relativeCameraOffset.applyMatrix4(car.matrixWorld);
+    // Clamp car position within ground
+    car.position.x = THREE.MathUtils.clamp(car.position.x, -195, 195);
+    car.position.z = THREE.MathUtils.clamp(car.position.z, -195, 195);
 
+    // Update audio pitch
+    if(audioCtx) {
+      oscillator.frequency.setValueAtTime(200 + carSpeed * 800, audioCtx.currentTime);
+      gainNode.gain.setValueAtTime(Math.abs(carSpeed)*0.1, audioCtx.currentTime);
+    }
+  }
+
+  function updateCamera() {
+    // Follow car from behind and above
+    const relativeCameraOffset = new THREE.Vector3(0, 5, -10);
+    const cameraOffset = relativeCameraOffset.applyEuler(car.rotation).add(car.position);
     camera.position.lerp(cameraOffset, 0.1);
     camera.lookAt(car.position);
+  }
 
-    // Mini-map car update
-    miniCar.position.copy(car.position);
-    miniCar.rotation.y = car.rotation.y;
-
-    // Mini-map camera follows car
-    miniCamera.position.set(car.position.x, 60, car.position.z);
-    miniCamera.lookAt(car.position.x, 0, car.position.z);
-
-    // Speedometer UI
-    const speedometerNeedle = document.getElementById('needle');
+  function updateSpeedometer() {
+    const needle = document.getElementById('needle');
     const speedValue = document.getElementById('speedValue');
-    const speedKmh = Math.abs(carSpeed) * 60 * 3.6;
-    speedValue.textContent = speedKmh.toFixed(0) + ' km/h';
 
-    let needleAngle = (speedKmh / maxSpeedKmh) * 180 - 90;
-    if(needleAngle > 90) needleAngle = 90;
-    if(needleAngle < -90) needleAngle = -90;
-    speedometerNeedle.style.transform = `rotate(${needleAngle}deg)`;
+    // Map speed to degrees (-90° to 90°)
+    const deg = THREE.MathUtils.clamp(carSpeed / maxSpeed, -1, 1) * 90;
+    needle.style.transform = `rotate(${deg}deg)`;
 
-    // Engine sound pitch/volume
-    if(audioCtx) {
-      const minFreq = 100;
-      const maxFreq = 800;
-      oscillator.frequency.value = minFreq + (maxFreq - minFreq) * (Math.abs(carSpeed) / maxSpeed);
-      gainNode.gain.value = 0.02 + 0.15 * (Math.abs(carSpeed) / maxSpeed);
-    }
+    speedValue.textContent = `${Math.abs((carSpeed / maxSpeed * 100) * 2).toFixed(0)} km/h`;
+  }
 
-    renderer.render(scene, camera);
-    miniRenderer.render(miniScene, miniCamera);
+  function updateMinimap() {
+    // Sync mini car position and rotation
+    miniCar.position.set(car.position.x, car.position.y, car.position.z);
+    miniCar.rotation.y = car.rotation.y;
   }
 </script>
 
 </body>
 </html>
+
 
