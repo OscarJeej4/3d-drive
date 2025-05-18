@@ -3,27 +3,70 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>3D Driving Game</title>
+<title>3D Driving Game - City with Collision</title>
 <style>
   body, html {
     margin: 0; padding: 0; overflow: hidden; background: #87ceeb;
-    touch-action: none; /* prevent default touch gestures */
+    touch-action: none;
+    font-family: monospace, monospace;
   }
   #info {
     position: absolute; top: 10px; left: 10px;
-    color: white; font-family: monospace; user-select:none;
+    color: white; user-select:none;
     background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px;
+    max-width: 220px;
   }
   #touchControls {
     position: absolute; bottom: 20px; left: 50%;
     transform: translateX(-50%);
     display: flex; gap: 20px;
+    z-index: 10;
   }
   .btn {
     width: 60px; height: 60px; border-radius: 30px;
     background: rgba(0,0,0,0.5); color: white;
     font-size: 24px; line-height: 60px; text-align: center;
     user-select:none;
+  }
+  #speedometer {
+    position: absolute;
+    bottom: 100px;
+    left: 20px;
+    width: 120px;
+    height: 120px;
+    background: rgba(0,0,0,0.5);
+    border-radius: 60px;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    user-select:none;
+    z-index: 10;
+  }
+  #speedometer .needle {
+    width: 2px;
+    height: 50px;
+    background: red;
+    position: relative;
+    top: -15px;
+    transform-origin: bottom center;
+    transition: transform 0.1s ease-out;
+  }
+  #speedValue {
+    font-size: 20px;
+    margin-top: 10px;
+  }
+  #minimap {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 200px;
+    height: 200px;
+    border: 2px solid white;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.5);
+    z-index: 10;
   }
 </style>
 </head>
@@ -41,38 +84,84 @@
   <div id="rightBtn" class="btn">▶️</div>
 </div>
 
+<div id="speedometer">
+  <div class="needle" id="needle"></div>
+  <div id="speedValue">0 km/h</div>
+</div>
+
+<div id="minimap"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
 
 <script>
   let scene, camera, renderer;
   let car, carSpeed = 0, maxSpeed = 0.3;
   let keys = { forward: false, back: false, left: false, right: false };
+  let buildings = [];
+  let carBox = new THREE.Box3();
+  let buildingBoxes = [];
+
+  // Mini-map vars
+  let miniRenderer, miniCamera, miniScene;
+  let miniCar;
+
+  // Audio vars
+  let audioCtx, oscillator, gainNode;
 
   init();
   animate();
 
   function init() {
+    // Main scene
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb); // sky blue
+    scene.background = new THREE.Color(0x87ceeb);
 
-    // Camera
     camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
     camera.position.set(0, 5, -10);
     camera.lookAt(0, 0, 0);
 
-    // Renderer
     renderer = new THREE.WebGLRenderer({antialias:true});
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
     // Ground
-    const groundGeo = new THREE.PlaneGeometry(200, 200);
-    const groundMat = new THREE.MeshPhongMaterial({color:0x228B22});
+    const groundGeo = new THREE.PlaneGeometry(400, 400);
+    const groundMat = new THREE.MeshPhongMaterial({color:0x333333});
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI/2;
     scene.add(ground);
 
-    // Car (simple box)
+    // Road lines
+    const lineMat = new THREE.LineBasicMaterial({color: 0xffffff});
+    for(let z = -200; z < 200; z += 10) {
+      const points = [new THREE.Vector3(-2, 0.01, z), new THREE.Vector3(2, 0.01, z)];
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+      const line = new THREE.Line(lineGeo, lineMat);
+      scene.add(line);
+    }
+
+    // Buildings
+    const buildingColors = [0x555555, 0x666666, 0x777777, 0x888888];
+    for(let x = -50; x <= 50; x += 10) {
+      for(let z = -50; z <= 50; z += 10) {
+        if(Math.abs(x) < 5 && Math.abs(z) < 200) continue; // keep road space
+        const height = 2 + Math.random() * 8;
+        const bGeo = new THREE.BoxGeometry(6, height, 6);
+        const bMat = new THREE.MeshStandardMaterial({color: buildingColors[Math.floor(Math.random()*buildingColors.length)]});
+        const building = new THREE.Mesh(bGeo, bMat);
+        building.position.set(x, height/2, z);
+        scene.add(building);
+        buildings.push(building);
+      }
+    }
+
+    // Create building bounding boxes for collision
+    buildings.forEach(b => {
+      let box = new THREE.Box3().setFromObject(b);
+      buildingBoxes.push(box);
+    });
+
+    // Car
     const carGeo = new THREE.BoxGeometry(1, 0.5, 2);
     const carMat = new THREE.MeshStandardMaterial({color:0xff0000});
     car = new THREE.Mesh(carGeo, carMat);
@@ -80,17 +169,45 @@
     scene.add(car);
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(ambientLight);
-
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(5, 10, 7);
     scene.add(directionalLight);
 
-    // Event Listeners
+    // Mini-map
+    miniScene = new THREE.Scene();
+
+    miniCamera = new THREE.OrthographicCamera(-30, 30, 30, -30, 0.1, 1000);
+    miniCamera.position.set(0, 60, 0);
+    miniCamera.lookAt(0, 0, 0);
+    miniScene.add(miniCamera);
+
+    // Grid helper for mini-map ground
+    miniScene.add(new THREE.GridHelper(100, 20, 0xffffff, 0x444444));
+
+    // Mini-map buildings (gray boxes)
+    buildings.forEach(b => {
+      const bMiniGeo = new THREE.BoxGeometry(b.geometry.parameters.width, b.geometry.parameters.height, b.geometry.parameters.depth);
+      const bMiniMat = new THREE.MeshBasicMaterial({color: 0x666666});
+      const bMini = new THREE.Mesh(bMiniGeo, bMiniMat);
+      bMini.position.copy(b.position);
+      miniScene.add(bMini);
+    });
+
+    // Mini car (blue)
+    const miniCarGeo = new THREE.BoxGeometry(1, 0.5, 2);
+    const miniCarMat = new THREE.MeshBasicMaterial({color: 0x0000ff});
+    miniCar = new THREE.Mesh(miniCarGeo, miniCarMat);
+    miniScene.add(miniCar);
+
+    miniRenderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+    miniRenderer.setSize(200, 200);
+    miniRenderer.setClearColor(0x000000, 0);
+    document.getElementById('minimap').appendChild(miniRenderer.domElement);
+
+    // Controls
     window.addEventListener('resize', onWindowResize);
 
-    // Keyboard controls
     window.addEventListener('keydown', (e) => {
       if(e.code === "KeyW") keys.forward = true;
       if(e.code === "KeyS") keys.back = true;
@@ -110,7 +227,6 @@
     const leftBtn = document.getElementById('leftBtn');
     const rightBtn = document.getElementById('rightBtn');
 
-    // Helper to add touch events for each button
     function addTouchEvents(button, key) {
       button.addEventListener('touchstart', (e) => {
         e.preventDefault();
@@ -130,6 +246,24 @@
     addTouchEvents(backBtn, 'back');
     addTouchEvents(leftBtn, 'left');
     addTouchEvents(rightBtn, 'right');
+
+    // Audio setup
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      oscillator = audioCtx.createOscillator();
+      oscillator.type = 'sawtooth';
+
+      gainNode = audioCtx.createGain();
+      gainNode.gain.value = 0.02;
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.start();
+    } catch (e) {
+      console.warn("Web Audio API not supported or context not allowed.");
+    }
   }
 
   function onWindowResize() {
@@ -138,10 +272,12 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
+  const maxSpeedKmh = 80;
+
   function animate() {
     requestAnimationFrame(animate);
 
-    // Update car movement
+    // Update car speed & rotation input
     if(keys.forward) {
       carSpeed += 0.01;
       if(carSpeed > maxSpeed) carSpeed = maxSpeed;
@@ -149,7 +285,6 @@
       carSpeed -= 0.01;
       if(carSpeed < -maxSpeed/2) carSpeed = -maxSpeed/2;
     } else {
-      // Friction slows the car gradually
       carSpeed *= 0.95;
       if(Math.abs(carSpeed) < 0.001) carSpeed = 0;
     }
@@ -157,20 +292,72 @@
     if(keys.left) car.rotation.y += 0.03;
     if(keys.right) car.rotation.y -= 0.03;
 
+    // Save old pos & rot for collision rollback
+    let oldPos = car.position.clone();
+    let oldRot = car.rotation.y;
+
     // Move car forward
     car.position.x += Math.sin(car.rotation.y) * carSpeed;
     car.position.z += Math.cos(car.rotation.y) * carSpeed;
 
-    // Update camera behind the car
+    // Update bounding box
+    carBox.setFromObject(car);
+
+    // Collision detection
+    let collided = false;
+    for(let i=0; i < buildingBoxes.length; i++) {
+      if(carBox.intersectsBox(buildingBoxes[i])) {
+        collided = true;
+        break;
+      }
+    }
+
+    if(collided) {
+      // Revert position & rotation, stop car
+      car.position.copy(oldPos);
+      car.rotation.y = oldRot;
+      carSpeed = 0;
+    }
+
+    // Update camera
     const relativeCameraOffset = new THREE.Vector3(0, 5, -10);
     const cameraOffset = relativeCameraOffset.applyMatrix4(car.matrixWorld);
 
     camera.position.lerp(cameraOffset, 0.1);
     camera.lookAt(car.position);
 
+    // Mini-map car update
+    miniCar.position.copy(car.position);
+    miniCar.rotation.y = car.rotation.y;
+
+    // Mini-map camera follows car
+    miniCamera.position.set(car.position.x, 60, car.position.z);
+    miniCamera.lookAt(car.position.x, 0, car.position.z);
+
+    // Speedometer UI
+    const speedometerNeedle = document.getElementById('needle');
+    const speedValue = document.getElementById('speedValue');
+    const speedKmh = Math.abs(carSpeed) * 60 * 3.6;
+    speedValue.textContent = speedKmh.toFixed(0) + ' km/h';
+
+    let needleAngle = (speedKmh / maxSpeedKmh) * 180 - 90;
+    if(needleAngle > 90) needleAngle = 90;
+    if(needleAngle < -90) needleAngle = -90;
+    speedometerNeedle.style.transform = `rotate(${needleAngle}deg)`;
+
+    // Engine sound pitch/volume
+    if(audioCtx) {
+      const minFreq = 100;
+      const maxFreq = 800;
+      oscillator.frequency.value = minFreq + (maxFreq - minFreq) * (Math.abs(carSpeed) / maxSpeed);
+      gainNode.gain.value = 0.02 + 0.15 * (Math.abs(carSpeed) / maxSpeed);
+    }
+
     renderer.render(scene, camera);
+    miniRenderer.render(miniScene, miniCamera);
   }
 </script>
 
 </body>
 </html>
+
